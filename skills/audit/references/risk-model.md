@@ -248,6 +248,16 @@ A few combinations escalate beyond the per-pattern severity:
 
 When a finding involves credentials an MCP server, hook or skill holds or reaches, the report's **Recommendation** names the narrower alternative: a read-only or project-scoped token, and short-lived credentials (AWS STS `GetScopedCredentials`, or `AssumeRole` with a session policy and a short duration; fine-grained GitHub tokens with an expiry). Do not stop at "remove the token".
 
+## Test fixtures
+
+Security tools, linters and parsers ship deliberately malicious samples to test themselves. A finding is an **inert fixture** only when all of these hold; the sub-agent states which file it checked for each:
+
+1. The file sits under a fixture directory: `tests/fixtures/`, `test/fixtures/`, `spec/fixtures/`, `__fixtures__/`, `testdata/`, `fixtures/` inside a test tree.
+2. Nothing outside that fixture directory runs, sources, imports, installs, registers or copies it: no hook, MCP declaration, settings file, skill, agent, command, manifest script (`package.json` `scripts`, `Makefile`, CI workflow) or code path names it. A test runner that only passes the directory to a scanner as data does not count; one that executes fixture code does.
+3. It is not at a path Claude Code or the plugin loader picks up from the installed plugin: the plugin root's `skills/`, `agents/`, `commands/`, `hooks/`, `.mcp.json`, `settings.json`, or a repository-root `.claude/`.
+
+Inert fixture findings collapse into one `CAUTION` per fixture directory ("planted test fixture: N findings, not reachable from the plugin"), with each finding still listed in the per-agent details. A fixture finding that fails any condition keeps its full severity, and so does a fixture that would act if a user opened its folder in an agent (a fixture `.mcp.json` or `.claude/` is `CAUTION` on its own line). A live-format secret in a fixture follows the static checklist's fixture rule. This applies to third-party repositories exactly as to this one: an attacker who parks a payload under `tests/fixtures/` and calls it from a hook fails condition 2.
+
 ## Documentation hits
 
 The mechanical helpers prefix a hit with `doc:` when it sits in plain documentation: a `.md`/`.mdx`/`.markdown`/`.rst`/`.adoc` file that is not an instruction file (not `SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, nothing under `agents/`, `commands/`, `hooks/`, `output-styles/`, `.claude/`, and no `name:` + `description:` frontmatter). Pattern catalogues, changelogs and READMEs describe attacks without carrying them out.

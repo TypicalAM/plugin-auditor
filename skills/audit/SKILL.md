@@ -35,17 +35,19 @@ The skill receives `$ARGUMENTS`. Resolve it as follows:
 |----------------|--------|
 | Empty | Use the current working directory as `REPO_PATH`. |
 | Existing local path | Use it directly as `REPO_PATH`. |
-| `https://github.com/...` or `https://gitlab.com/...` (optionally with `@ref`) | Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/clone_repo.sh" <url>` to shallow-clone into `${PWD}/.plugin-auditor-tmp/{repo}-{timestamp}/`. Use the printed path as `REPO_PATH`. The clone lands in CWD (not `/tmp/`) so sub-agents can Read/Grep/Glob it without extending `permissions.additionalDirectories`. |
+| `https://github.com/...` or `https://gitlab.com/...` (optionally with `@ref`) | Run `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/clone_repo.sh <url>` to shallow-clone into `${PWD}/.plugin-auditor-tmp/{repo}-{timestamp}/`. Use the printed path as `REPO_PATH`. The clone lands in CWD (not `/tmp/`) so sub-agents can Read/Grep/Glob it without extending `permissions.additionalDirectories`. |
 | Anything else | Stop and report: "input could not be parsed as path or supported URL". |
 
 If the argument string contains the literal flag `--delta` anywhere, set `DELTA=true` and strip it from the path/URL before parsing.
 
 ## Step 1 — Setup
 
+**Command form.** The `Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/*)` grant matches the command text literally. Write every helper call exactly as `bash <expanded plugin root>/skills/audit/scripts/<helper> <args>`, with no quotes around the script path, or the call is refused. If `REPO_PATH` contains spaces or shell metacharacters, stop and tell the user to audit a copy at a plain path.
+
 Run once at the start of every audit:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/ensure_reports_dir.sh"
+bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/ensure_reports_dir.sh
 ```
 
 This creates `~/.claude/plugin-auditor-reports/` and `~/.claude/plugin-auditor-reports/.state/` idempotently.
@@ -55,7 +57,7 @@ This creates `~/.claude/plugin-auditor-reports/` and `~/.claude/plugin-auditor-r
 After Step 0 produced `REPO_PATH`, capture:
 
 - `REPO_SLUG` — derived from the directory name; lowercase, replace non-alphanumerics with `-`.
-- `HEAD_SHA` — full git SHA at HEAD (run `bash "${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/git_head.sh" "$REPO_PATH"`). Never call `git` on the target directly: its `.git/config` is untrusted and keys like `core.fsmonitor` run commands on ordinary git calls. The helper pins them to inert values.
+- `HEAD_SHA` — full git SHA at HEAD (run `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/git_head.sh <REPO_PATH>`). Never call `git` on the target directly: its `.git/config` is untrusted and keys like `core.fsmonitor` run commands on ordinary git calls. The helper pins them to inert values.
 - `SHORT_SHA` — first 7 chars.
 
 If the path is not a git repository, still proceed with the audit but set `HEAD_SHA="nogit-$(date +%s)"`, skip delta mode, and add a `CAUTION` finding "Repository is not under version control — provenance cannot be verified".
@@ -65,7 +67,7 @@ If the path is not a git repository, still proceed with the audit but set `HEAD_
 Read `~/.claude/plugin-auditor-reports/.state/${REPO_SLUG}.json` if it exists.
 
 - If a previous SHA exists and equals the current `HEAD_SHA` → ask the user via `AskUserQuestion`: "no changes since last audit on `<date>`, verdict was `<verdict>`. Re-running anyway?". If they decline, exit cleanly. A legacy state file may carry `"verdict": "SAFE"` from an earlier plugin version; display it as `NO FINDINGS (static)`.
-- If a previous SHA exists and differs → run `bash "${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/compute_delta.sh" "$REPO_PATH" <prev_sha>` to capture the list of changed files. Pass this list to each sub-agent so they scope their work to it.
+- If a previous SHA exists and differs → run `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/compute_delta.sh <REPO_PATH> <prev_sha>` to capture the list of changed files. Pass this list to each sub-agent so they scope their work to it.
 - If no previous SHA → fall back to a full audit and notify the user that delta mode requires a prior audit.
 
 **Dormant-code activation guard.** Delta mode is a blind spot: an attacker can land inert code in a commit you audit clean, then flip it on in a later small diff. So instruct the sub-agents that, for each changed file, they must also inspect what that change now *reaches* — a new `import`, `require`, `source`, hook registration, dependency wiring, or call that references a file, script, or package which was already in the repo but previously unreferenced. Such a file is in scope for this audit even though it is not itself in `CHANGED_FILES`; treat its activation as a `CAUTION` (per `risk-model.md`) and scan the now-live target. Add a standing line to the delta report: "Delta mode only inspects changed files plus code they newly activate; dormant code introduced in earlier commits and not touched here is not re-scanned."
@@ -95,7 +97,7 @@ These two values (already expanded) go into the sub-agent prompts in Step 5. Nev
 
 The sub-agents have no shell (a sub-agent `tools` list cannot scope Bash to a path, and an unrestricted `Bash` grant is the very `FAIL` this plugin reports). The orchestrator runs every helper under its `Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/*)` grant and hands each sub-agent the output it owns.
 
-1. Run each helper as `bash "${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/<helper>" "$REPO_PATH"` and capture stdout: `scan_secrets.sh`, `scan_obfuscation.sh`, `scan_binaries.sh`, `scan_unicode.sh`, `scan_network.sh`, `scan_trust_surface.sh`.
+1. Run each helper as `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/<helper> <REPO_PATH>` and capture stdout: `scan_secrets.sh`, `scan_obfuscation.sh`, `scan_binaries.sh`, `scan_unicode.sh`, `scan_network.sh`, `scan_trust_surface.sh`.
 2. Save each raw output with `Write` (NOT a shell redirect: capture the Bash stdout, then write it) to `~/.claude/plugin-auditor-reports/.raw/${REPO_SLUG}-${SHORT_SHA}-<scan>.txt`. The `Write(${HOME}/.claude/plugin-auditor-reports/**)` grant covers this path.
 3. **Delta mode:** filter each output to the lines whose path is in `CHANGED_FILES` (plus any file newly activated per the dormant-code guard).
 4. Ownership, used both for `SCAN_OUTPUTS` in Step 5 and for the cross-check in Step 5a:
@@ -133,6 +135,8 @@ never search for them inside REPO_PATH.
 Return findings as a single markdown block with three sections:
 ### OK / ### CAUTION / ### FAIL.
 Every finding must include a `path:line` reference and a one-sentence quoted excerpt.
+For a finding under a test-fixture directory, append `(fixture: unreachable)` or
+`(fixture: reachable via <path:line>)` per risk-model.md "Test fixtures".
 ```
 
 Sub-agent → reference file mapping (build the absolute path from `REFERENCES_DIR` defined in Step 4a):
@@ -171,7 +175,7 @@ The sub-agents turn the Step 4b output into prose. A sub-agent whose own context
 
 Collect the five markdown reports and the guard's JSON. For each finding from the five checklist auditors:
 
-1. Look up its severity in `references/risk-model.md`. If a finding does not match any catalogued pattern, classify it as `CAUTION` by default.
+1. Look up its severity in `references/risk-model.md`. If a finding does not match any catalogued pattern, classify it as `CAUTION` by default. Then apply the "Test fixtures" rule: unreachable fixture findings collapse into one `CAUTION` per fixture directory; reachable ones keep their severity.
 2. Group by severity (`FAIL`, `CAUTION`, `OK`).
 
 ### Step 6a — Merge the injection guard (escalate-only)
@@ -267,7 +271,7 @@ Run this step ONLY if the orchestrator cloned the repository itself in Step 0 (i
 3. If the user picked a removal option, for each path to delete run:
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/cleanup_clone.sh" "<absolute path>"
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/cleanup_clone.sh <absolute path>
    ```
 
    The script validates that the path is inside `${PWD}/.plugin-auditor-tmp/` and refuses anything else — do not bypass it with `rm -rf`.
