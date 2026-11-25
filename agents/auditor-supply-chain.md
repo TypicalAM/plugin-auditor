@@ -15,6 +15,7 @@ Supply-chain risk is the most common path to a compromise in modern dev tooling.
 - `REPO_PATH` — absolute path to the audited repository.
 - `REFERENCE_PATH` — absolute path to `references/supply-chain-checklist.md`.
 - `RISK_MODEL_PATH` — absolute path to `references/risk-model.md`.
+- `SCRIPTS_PATH`: absolute path to `skills/audit/scripts/`.
 - `CHANGED_FILES` (optional) — newline-separated list for delta mode.
 
 Read both reference files on every run.
@@ -41,7 +42,8 @@ Skip vendored installs (`node_modules/`, `vendor/`, `.venv/`).
 
 Follow `supply-chain-checklist.md` in order:
 
-1. **Lifecycle scripts.** Read each `package.json` `scripts` block. Flag `preinstall`, `postinstall`, `prepublish`, `postpublish`, `prepare`. Escalate to `FAIL` if the script body fetches and runs remote code.
+0. **Trust-surface helper.** Run `bash ${SCRIPTS_PATH}/scan_trust_surface.sh ${REPO_PATH}` and keep the lines in your categories: `lifecycle_script`, `nondefault_index`. Every such path must appear in your report (the orchestrator cross-checks).
+1. **Lifecycle scripts.** Read each `package.json` `scripts` block. Flag `preinstall`, `postinstall`, `prepublish`, `postpublish`, `prepare`. Escalate to `FAIL` if the script body fetches and runs remote code, if it runs a repo file that another script or sync step overwrites, or if anything in the repo edits `scripts` (`npm pkg set scripts.*`). `prepare` runs on a plain `npm install`, and `acceptEdits` does not guard `package.json`.
 2. **Typosquatting heuristics.** For each declared dependency, compute a Levenshtein distance against the baseline lists in the checklist. Distance == 1 is `CAUTION`; distance == 1 with a leading/trailing digit or underscore is `FAIL`.
 3. **Lockfile presence and integrity.** Walk the table in the checklist. Missing lockfile is `CAUTION`. Lockfile present but install commands in README/CI do not enforce frozen mode is `CAUTION`.
 4. **Git dependencies.** For each git URL in a manifest, classify by pinning level (SHA = OK, tag = CAUTION, branch/floating = FAIL) and by source (official org = neutral, personal account = escalate one level).
@@ -49,6 +51,7 @@ Follow `supply-chain-checklist.md` in order:
 6. **MCP servers.** For each declaration: `npx` with no version pin is `FAIL`; `npx` with a pinned version is `CAUTION`; HTTP/binary `command` outside the repo is `FAIL`.
 7. **Optional / transient deps.** Inspect `optionalDependencies`, `peerDependencies`, `devDependencies` for known lifecycle-script offenders or runtime re-exports.
 8. **Registry overrides.** Read `.npmrc`, `.yarnrc`, `pip.conf`, `.cargo/config.toml`. A registry override that disables integrity checks (`strict-ssl=false`, `package-lock=false`) is `FAIL`.
+8a. **Non-default package indexes.** `pip install --index-url` / `--extra-index-url`, `npm --registry`, `Install-Module -Repository`, `gem install --source` in a skill, agent, command or hook is `FAIL` (the agentjacking "hotfix" step); in a README it is `CAUTION`.
 9. **Vendored binaries.** Cross-reference with the static checklist: if `node_modules/`, `vendor/`, or `dist/` is committed and `bin` fields point at checked-in binaries not built from source, flag.
 
 ## Levenshtein computation

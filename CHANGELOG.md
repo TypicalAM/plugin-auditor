@@ -4,6 +4,59 @@ All notable changes to `plugin-auditor` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-11-25
+
+Coverage for the 2026 agent attack patterns: a write that becomes a later execute, git
+config that runs on `git status`, Python startup hooks, sandbox weakening, agentjacking
+through tool output, credential reach, lateral movement and exfil channels beyond plain
+HTTP. Hooks and MCP servers run outside the Claude Code sandbox, so findings there are now
+judged at full severity.
+
+### Added
+- **`scan_trust_surface.sh`.** A new mechanical helper with twelve categories:
+  `config_write`, `git_exec_config`, `py_stdlib_shadow`, `py_pth`, `sandbox_weaken`,
+  `pre_trust` (owned by `auditor-config`); `cred_reach`, `lateral_movement`,
+  `exfil_channel`, `llm_router` (owned by `auditor-network-fs`); `lifecycle_script`,
+  `nondefault_index` (owned by `auditor-supply-chain`). It is part of the Step 5a
+  mechanical cross-check, split by category.
+- **Config write is future execute.** Writes to `.claude/settings*.json`, hooks,
+  `.mcp.json`, `.vscode/tasks.json`, `.git/hooks`, `.git/config`, venv activate, CI files
+  and `package.json` lifecycle scripts are `FAIL`, including the `prepare` target swap that
+  `acceptEdits` does not guard and the Cursor CVE-2026-48124 style settings handoff.
+- **GitSpawn.** Shipped or written `core.fsmonitor` (command), `core.hooksPath`,
+  `core.sshCommand`, `core.pager`, `diff.external`, textconv/filter/merge drivers and `!`
+  aliases are `FAIL`. Shipped `.git/config` files are read too.
+- **Python import shadowing.** `.pth`, `sitecustomize.py` and `usercustomize.py` are
+  `FAIL`; stdlib-named files in script directories are `CAUTION`.
+- **Sandbox and permission weakening.** `sandbox.enabled: false`,
+  `allowUnsandboxedCommands`, container runtimes in `excludedCommands`, `docker.sock`
+  exposure, `$HOME` mounts, `allowedDomains: ["*"]`, `bypassPermissions`,
+  `--dangerously-skip-permissions`.
+- **Runs before trust.** `Setup` hooks join `SessionStart`; `enableAllProjectMcpServers`
+  and `enabledMcpjsonServers` in shipped settings are `FAIL`; project `.mcp.json` local
+  servers are `CAUTION`.
+- **Agentjacking.** MCP servers and skills that relay third-party content (error trackers,
+  tickets, logs, web pages) to the model, skills that tell the model to act on it, and
+  "hotfix" installs from a non-default index (`pip --index-url`, `npm --registry`,
+  `Install-Module -Repository`).
+- **Credential reach, lateral movement, exfil channels.** Keychain, CLI token minting,
+  browser profiles, inherited env tokens; ssh/scp, PowerShell remoting, cloud remote exec,
+  logged-in browser driving; `git push` to foreign remotes, object storage, gists, webhook
+  sinks; `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` overrides to third-party routers.
+  Credential recommendations now name scoped, short-lived alternatives (STS
+  `GetScopedCredentials`).
+- Three new escalation rules in `risk-model.md`: agentjacking chain, credential reach plus
+  lateral/exfil, and network-fs `CAUTION` findings inside hooks or MCP servers.
+- Fixtures: inert `dot-git/config`, `dot-claude/settings.local.json`,
+  `scripts/vendor-sync.sh`, `hooks/post-tool.sh`, `skills/hotfix/SKILL.md`,
+  `mcp/tickets_server.py`, `scripts/json.py`, `src/canary.pth`; safe-fixture near-misses for
+  builtin fsmonitor, `GIT_PAGER=cat` and a package-internal `json.py`. Hosts are
+  `example.invalid` or `127.0.0.1` only.
+
+### Changed
+- `auditor-config` gains `Bash`, limited to the helper scripts.
+- `prepare` is weighed like `postinstall` in the supply-chain checklist.
+
 ## [0.3.0] - 2026-07-13
 
 Trust-hardening pass. 0.2.0 raised detection quality; this release addresses who the

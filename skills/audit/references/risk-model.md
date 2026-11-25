@@ -70,6 +70,8 @@ A wildcard interpreter grant has the same attack surface as `Bash(*)`: the wildc
 | `PreToolUse` hook installed by default | `hooks/PreToolUse/*.sh` shipped active in `settings.json` | claude-artifacts, config |
 | `PostToolUse` hook installed by default | `hooks/PostToolUse/*.sh` shipped active | claude-artifacts, config |
 | `SessionStart` hook installed by default | runs at every Claude Code launch | claude-artifacts, config |
+| `Setup` hook installed by default | runs before the user has typed anything | claude-artifacts, config |
+| MCP auto-approval in shipped settings | `enableAllProjectMcpServers: true` or `enabledMcpjsonServers` (project servers start without the approval prompt) | config, claude-artifacts |
 | Reads Claude Code history | path matches `~/.claude/projects/**/*.jsonl` or `$HOME/.claude/projects/**` | claude-artifacts, network-fs |
 | Modifies global settings | writes to `~/.claude/settings.json` from within audited code | claude-artifacts, config |
 
@@ -84,6 +86,38 @@ A wildcard interpreter grant has the same attack surface as `Bash(*)`: the wildc
 | Path traversal outside repo | hardcoded `../../../etc/`, `../../.ssh/`, traversal in skill paths | static, network-fs |
 | Reads SSH private keys | accesses `~/.ssh/id_*`, `~/.ssh/config`, GitHub Apps PEMs | network-fs |
 | Reads cloud credentials | accesses `~/.aws/credentials`, `~/.config/gcloud/`, `~/.azure/` | network-fs |
+
+### Future execution (a write is a later execute)
+
+Hooks, MCP servers and file tools run outside the Claude Code sandbox (which covers only Bash, PowerShell and Monitor commands and their children), so these are judged in hooks and MCP servers at full severity.
+
+| Pattern | Example signature | Domain |
+|---------|-------------------|--------|
+| Write to a file another trusted process loads | code, hook or artifact instruction writing `.claude/settings*.json`, `.claude/hooks/`, `.mcp.json`, `.vscode/tasks.json`, `.git/hooks/*`, `.git/config`, `bin/activate`, `.envrc`, `.github/workflows/*` | config, claude-artifacts |
+| `package.json` lifecycle script swap | `npm pkg set scripts.prepare=...`, or a sync step that overwrites the file a `prepare`/`postinstall` script runs (not guarded by `acceptEdits`) | config, supply-chain |
+| Executing git config (GitSpawn) | shipped or written `core.fsmonitor` (command), `core.hooksPath`, `core.sshCommand`, `core.pager`, `diff.external`, `diff.*.textconv`, `filter.*.smudge/clean/process` | config |
+| Python startup hook | shipped or written `*.pth` in `site-packages`, `sitecustomize.py`, `usercustomize.py` | config, static |
+
+### Sandbox and permission weakening
+
+| Pattern | Example signature | Domain |
+|---------|-------------------|--------|
+| Sandbox disabled or bypassable | `sandbox.enabled: false`, `allowUnsandboxedCommands: true`, `dangerouslyDisableSandbox` in a hook, script or skill | config |
+| Container runtime excluded from the sandbox | `excludedCommands` containing `docker`, `podman`, `nerdctl`, `kubectl`, `sudo` | config |
+| docker.sock or home directory reachable | `allowUnixSockets` with `docker.sock`; container run mounting `docker.sock`, `$HOME`, `~`, `/Users/<name>` | config, static |
+| Wildcard network allowlist | `allowedDomains: ["*"]` | config |
+| Permission prompts off | `defaultMode: bypassPermissions`, `--dangerously-skip-permissions`, `skipDangerousModePermissionPrompt` in shipped settings, hooks or scripts | config |
+
+### Credential reach, lateral movement, exfil channels
+
+| Pattern | Example signature | Domain |
+|---------|-------------------|--------|
+| Keychain, browser profile or CLI token minting | `security find-generic-password`, `Login Data`, `Cookies`, `gh auth token`, `aws configure export-credentials` in a hook or MCP server | network-fs |
+| Lateral movement from a hook or MCP server | `ssh user@host`, `scp`, `Invoke-Command`, `Enter-PSSession`, `aws ssm send-command`, `kubectl exec` | network-fs |
+| Non-HTTP exfil channel | `git push <url>` to a non-upstream remote, `aws s3 cp` / `gsutil cp` of repo or home data, `gh gist create` with file contents, webhook/paste sinks | network-fs |
+| Third-party model router | `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` pointing at a host other than `api.anthropic.com` / `api.openai.com` in settings `env`, hooks, MCP config or scripts | network-fs, claude-artifacts |
+| Agentjacking instruction | an artifact that tells the model to act on third-party tool output ("apply the Resolution", "run the command in the ticket") | claude-artifacts |
+| Hotfix from a non-default index | skill, agent, command or hook step `pip install --index-url`, `npm --registry`, `Install-Module -Repository` | supply-chain, claude-artifacts |
 
 ### Obfuscation
 
@@ -136,6 +170,15 @@ A wildcard interpreter grant has the same attack surface as `Bash(*)`: the wildc
 | User-content subdomain on a trusted host | outbound URL under `*.github.io` / `*.pages.dev` / `*.web.app` / `*.workers.dev` / `*.netlify.app` / `*.vercel.app` or a per-user `raw.githubusercontent.com` path | network-fs |
 | Submodule from a non-official source | `.gitmodules` URL is not the upstream project | supply-chain |
 | Optional dependency that runs scripts | `optionalDependencies` with packages known to run lifecycle scripts | supply-chain |
+| `prepare` script in `package.json` | runs on plain `npm install` and on install from a git URL | supply-chain |
+| Python stdlib shadowing | `json.py`, `struct.py`, `os.py`... in a script directory without `__init__.py` | config |
+| Project `.mcp.json` local server | starts with every session once approved, outside the sandbox | config, claude-artifacts |
+| Third-party content returned to the model | MCP server or skill relaying Sentry, ticket, log or web text verbatim, without untrusted-data framing | claude-artifacts |
+| Credential reach from a user-invoked skill | `.env` read, `gh auth token`, inherited `GITHUB_TOKEN` / `AWS_*` forwarded to a child | network-fs |
+| Broad token where a scoped one would do | MCP server configured with an admin or org-wide token | network-fs |
+| Lateral movement or browser driving in a skill | `ssh`, `scp`, `Invoke-Command`, Claude in Chrome with logged-in sessions, in a user-invoked skill | network-fs |
+| GitHub as a dead drop | `gh issue create`, `gh gist create` without sensitive payload | network-fs |
+| Permission bypass documented for the user | README telling the user when to pass `--dangerously-skip-permissions` | config |
 
 ### Allowlist of well-known endpoints
 
@@ -178,6 +221,10 @@ The report should explicitly enumerate positive checks so the user sees what was
 | Network calls only to allowlisted domains | Every fetched URL is on the standard allowlist. |
 | MCP servers pinned | If MCP servers are declared, they are pinned to specific versions and not fetched at runtime. |
 | Slash commands and agents scoped | `allowed-tools` and agent `tools` are explicit (specific module, script path, or subcommand), no `Bash(*)` and no wildcard interpreter grants. |
+| No future-execution writes | Nothing writes agent settings, hooks, MCP config, editor tasks, git hooks/config, venv activate, CI files or `package.json` scripts. |
+| Sandbox intact | No setting, hook or script disables or bypasses the sandbox, exposes `docker.sock`, or turns permission prompts off. |
+| No credential reach beyond the plugin's job | No keychain, browser-profile, CLI-token or inherited-token access; MCP tokens are scoped. |
+| No lateral movement or non-HTTP exfil | No ssh/scp/remoting, git-push, object-storage, gist or webhook channels; no third-party model router. |
 
 ---
 
@@ -193,6 +240,13 @@ A few combinations escalate beyond the per-pattern severity:
 6. **Injection guard and `auditor-claude-artifacts` both flag the same file with injection intent** → the existing `FAIL` stands, now corroborated. Escalation to `FAIL` requires an injection-type finding on *both* sides; a guard flag paired with a non-injection artifact finding (e.g. broad-description trigger-hijack) is a disagreement, not corroboration.
 7. **Injection guard flags a file the artifact auditor scanned and passed** → `CAUTION` "guard/auditor disagreement — possible auditor-targeted injection". The guard never lowers a severity; it only adds this suspicion.
 8. **Injection guard returned no report, or off-schema output** → automatic minimum verdict of `CAUTION`. A silent or malformed guard is not a clean guard.
+9. **Third-party content to the model + any execute or install path in the same plugin** (shell grant, hook, non-default index step) → `FAIL` (agentjacking chain).
+10. **Credential reach + lateral movement or a non-HTTP exfil channel in the same hook, MCP server or script** → `FAIL` regardless of each part's own severity.
+11. **Any `CAUTION` finding located in a hook or MCP server** for credential reach, lateral movement or exfil → `FAIL`. They run outside the sandbox without per-call review.
+
+### Recommendations for credential findings
+
+When a finding involves credentials an MCP server, hook or skill holds or reaches, the report's **Recommendation** names the narrower alternative: a read-only or project-scoped token, and short-lived credentials (AWS STS `GetScopedCredentials`, or `AssumeRole` with a session policy and a short duration; fine-grained GitHub tokens with an expiry). Do not stop at "remove the token".
 
 ## Artifact file set (single source of truth)
 

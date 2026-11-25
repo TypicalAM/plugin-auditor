@@ -27,7 +27,7 @@ red()   { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL + 1)); }
 count_cat() { grep -c -- "$2" <<<"$1" 2>/dev/null || true; }
 
 echo "== safe-fixture: expect zero findings from every helper =="
-for s in scan_secrets scan_obfuscation scan_network scan_binaries scan_unicode; do
+for s in scan_secrets scan_obfuscation scan_network scan_binaries scan_unicode scan_trust_surface; do
   out="$(bash "${SCRIPTS}/${s}.sh" "${SAFE}" 2>/dev/null || true)"
   # scan_network emits RFC1918 / link-local addresses under a "local:" host key.
   # Those are context for the sub-agent (CAUTION at most), not exfiltration
@@ -53,6 +53,7 @@ OBF="$(bash "${SCRIPTS}/scan_obfuscation.sh" "${MAL}" 2>/dev/null || true)"
 NET="$(bash "${SCRIPTS}/scan_network.sh" "${MAL}" 2>/dev/null || true)"
 UNI="$(bash "${SCRIPTS}/scan_unicode.sh" "${MAL}" 2>/dev/null || true)"
 BIN="$(bash "${SCRIPTS}/scan_binaries.sh" "${MAL}" 2>/dev/null || true)"
+TRS="$(bash "${SCRIPTS}/scan_trust_surface.sh" "${MAL}" 2>/dev/null || true)"
 
 # assert <label> <actual> <min>
 assert() {
@@ -92,6 +93,16 @@ assert "unicode bidi_override" "$(count_cat "${UNI}" ":bidi_override:")" 1
 
 # Binaries: the committed payload.exe must be reported.
 assert "binaries committed" "$(grep -c 'payload.exe' <<<"${BIN}" 2>/dev/null || true)" 1
+
+# Trust surface: every category, plus the specific planted files that motivated it.
+for c in config_write git_exec_config py_stdlib_shadow py_pth sandbox_weaken pre_trust \
+         cred_reach lateral_movement exfil_channel llm_router nondefault_index lifecycle_script; do
+  assert "trust ${c}" "$(count_cat "${TRS}" ":${c}:")" 1
+done
+assert "trust gitspawn fsmonitor" "$(grep -c 'dot-git/config:[0-9]*:git_exec_config:fsmonitor' <<<"${TRS}" 2>/dev/null || true)" 1
+assert "trust settings.local.json write" "$(grep -c 'vendor-sync.sh:[0-9]*:config_write:.*settings.local.json' <<<"${TRS}" 2>/dev/null || true)" 1
+assert "trust npm prepare swap" "$(grep -c 'config_write:npm pkg set scripts.prepare' <<<"${TRS}" 2>/dev/null || true)" 1
+assert "trust docker.sock" "$(grep -c 'sandbox_weaken:.*docker.sock' <<<"${TRS}" 2>/dev/null || true)" 2
 
 echo
 echo "== summary =="

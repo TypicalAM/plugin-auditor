@@ -148,6 +148,7 @@ The `auditor-static` and `auditor-network-fs` sub-agents run the deterministic s
 1. Run each helper directly (you already hold the `Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/*)` grant) and capture stdout:
    - `scan_secrets.sh`, `scan_obfuscation.sh`, `scan_binaries.sh`, `scan_unicode.sh` → belong to `auditor-static`.
    - `scan_network.sh` → belongs to `auditor-network-fs`.
+   - `scan_trust_surface.sh` → split by category (field 3): `config_write`, `git_exec_config`, `py_stdlib_shadow`, `py_pth`, `sandbox_weaken`, `pre_trust` belong to `auditor-config`; `cred_reach`, `lateral_movement`, `exfil_channel`, `llm_router` to `auditor-network-fs`; `lifecycle_script`, `nondefault_index` to `auditor-supply-chain`.
 2. Save each raw output with `Write` (NOT a shell redirect — capture the Bash stdout, then write it) to `~/.claude/plugin-auditor-reports/.raw/${REPO_SLUG}-${SHORT_SHA}-<scan>.txt`. The `Write(${HOME}/.claude/plugin-auditor-reports/**)` grant covers this path.
 3. **Delta mode:** filter each raw output to the lines whose path is in `CHANGED_FILES` (plus any file newly activated per the dormant-code guard) BEFORE comparing. A pre-existing finding outside the diff is not something the delta-scoped sub-agent was asked to report, so it must not read as suppression.
 4. For every path (from `scan_*`) and every host (from `scan_network`) present in the filtered raw output, confirm it appears **somewhere** in the owning sub-agent's report — in any section, at any severity. Sub-agents legitimately transform findings (a fixture secret downgraded to `CAUTION`, allowlisted hosts collapsed into one `OK` line), so match on the presence of the path or host, not on count or severity.
@@ -200,7 +201,7 @@ Mandatory sections, in this order:
 5. `## Caution (N)` — same shape for `CAUTION`. Skip if N=0.
 6. `## Verified OK (N)` — bulleted list of positive checks.
 7. `## Per-agent details` — one subsection per sub-agent with its raw report.
-8. `## Audit metadata` — sub-agents used, files scanned, lines of code (best-effort), execution time, plugin version (`0.3.0`), delta mode flag.
+8. `## Audit metadata` — sub-agents used, files scanned, lines of code (best-effort), execution time, plugin version (`0.4.0`), delta mode flag.
 
 Use ASCII characters only — no emojis — to match the project conventions documented in the README.
 
