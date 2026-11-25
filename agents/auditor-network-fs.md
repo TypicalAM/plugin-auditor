@@ -60,7 +60,7 @@ Read both reference files on every run.
 
 10. **Telemetry.** Identify telemetry endpoints. Default-on telemetry sending free-form data is `CAUTION`. Telemetry that includes secret-pattern matches is `FAIL`.
 
-11. **Trust-surface helper.** Read the `scan_trust_surface.sh` lines in `SCAN_OUTPUTS` for your categories: `cred_reach`, `lateral_movement`, `exfil_channel`, `llm_router`. Every such path must appear in your report (the orchestrator cross-checks). Classify with `network-fs-patterns.md` #10 to #12. A finding inside a hook or MCP server is `FAIL` where the same line in a user-invoked skill is `CAUTION`: hooks and MCP servers run outside the sandbox without per-call review.
+11. **Trust-surface helper.** Read the `scan_trust_surface.sh` lines in `SCAN_OUTPUTS` for your categories: `cred_reach`, `lateral_movement`, `exfil_channel`, `llm_router`. Every such path must appear in your report (the orchestrator cross-checks). List every path from your categories, including hits in instruction files, fixtures and `doc:` lines, even when another auditor also covers that file: the cross-check matches per owner, and a path missing from your report is reported as a suppressed finding (`FAIL`). Classify with `network-fs-patterns.md` #10 to #12. A finding inside a hook or MCP server is `FAIL` where the same line in a user-invoked skill is `CAUTION`: hooks and MCP servers run outside the sandbox without per-call review.
 
 12. **Credential scope.** For any MCP server or hook that holds or reaches a token, say in the finding whether a read-only or project-scoped token would do, and recommend short-lived credentials (AWS STS `GetScopedCredentials`, or `AssumeRole` with a session policy) in place of long-lived keys.
 

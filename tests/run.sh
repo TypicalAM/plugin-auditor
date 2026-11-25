@@ -123,6 +123,9 @@ echo "== sub-agents have no shell =="
 n="$(grep -lE '^tools:.*\bBash\b' "${ROOT}"/agents/*.md 2>/dev/null | wc -l | tr -d ' ')"
 if [[ "${n}" -eq 0 ]]; then green "no agent lists Bash in tools"; else red "${n} agent(s) list Bash in tools"; fi
 
+n="$(grep -cE 'Bash\(bash [^)]*/scripts/\*\)' "${ROOT}/skills/audit/SKILL.md" || true)"
+if [[ "${n}" -eq 0 ]]; then green "no directory-wildcard script grant in SKILL.md"; else red "${n} directory-wildcard script grant(s)"; fi
+
 echo "== git on the target runs with exec-capable config pinned =="
 TRAP="$(mktemp -d)"
 (

@@ -251,7 +251,7 @@ Plugin-auditor itself runs inside Claude Code with elevated trust — it reads y
 **Tools the plugin grants itself** (declared in `agents/*.md` and `skills/audit/SKILL.md`):
 
 - `Read`, `Grep`, `Glob` — every component, every audit. Read-only inspection.
-- `Bash` (orchestrator only): `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/*`, the helper scripts shipped with the plugin. No direct git call is pre-approved; `git_head.sh` and `compute_delta.sh` run git with the target's exec-capable config (`core.fsmonitor`, `core.hooksPath`, `core.pager`, `diff.external`...) pinned to inert values.
+- `Bash` (orchestrator only): one grant per helper script shipped with the plugin (`bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/<helper> *`), never a directory wildcard, which would also match `scripts/../<anything>`. No direct git call is pre-approved; `git_head.sh` and `compute_delta.sh` run git with the target's exec-capable config (`core.fsmonitor`, `core.hooksPath`, `core.pager`, `diff.external`...) pinned to inert values.
   - No sub-agent has `Bash`. A sub-agent `tools` list cannot scope Bash to a path, so the orchestrator runs the helpers and passes their output in; every sub-agent only has `Read`, `Grep` and `Glob`, and a compromised prompt cannot reach a shell.
 - `Agent` — the orchestrator only. Used to fan out to the six sub-agents in parallel. Sub-agents themselves cannot spawn further sub-agents (a Claude Code platform limit, not just policy).
 - `Write` — the orchestrator only, restricted to `${HOME}/.claude/plugin-auditor-reports/**`. Reports and the delta-mode state file land there; no other path is pre-approved.
