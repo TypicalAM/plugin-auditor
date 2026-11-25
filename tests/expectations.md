@@ -63,6 +63,20 @@ nothing runs on clone or when an agent opens this repo: `dot-git/config` stands 
 `dot-claude/settings.local.json` for `.claude/settings.local.json`, `dot-mcp.json` for `.mcp.json`. The scanner reads both names.
 All hosts are `example.invalid` or `127.0.0.1`, and every payload only prints a `CANARY-*` string.
 
+## Generated cases (built in a temp dir by run.sh)
+
+Files that would act on clone or on opening the repo in an agent (an instruction file named
+`CLAUDE.local.md`, a symlink, a NUL file) are generated at test time and removed after:
+
+- Instruction files are never `doc:`-tagged: `CLAUDE.local.md`, `Claude.md`, `skills/x/references/r.md`,
+  `.github/copilot-instructions.md`. A `README.md` is tagged even when an ancestor of the audited
+  repo is named `agents/` (classification uses the path relative to the repo root).
+- `nondefault_index` fires when a first-party `--index-url` sits beside a non-first-party
+  `--extra-index-url` (both orders); a first-party-only index stays silent.
+- `llm_router` fires for `https://api.anthropic.com@router.example.invalid`.
+- `skipped:<reason>:<relpath>` lines for a symlink, a NUL file, a file over 2MB and a non-UTF-8 file.
+- Every helper run on a missing directory prints `helper_error:<helper>:rc=65:...`.
+
 ## Known evasion gaps (documented, not asserted)
 
 These are deliberately present in the malicious fixture and are **not** expected to

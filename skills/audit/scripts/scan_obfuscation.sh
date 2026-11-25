@@ -11,6 +11,10 @@
 
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib_status.sh
+source "${HERE}/lib_status.sh"
+
 if [[ $# -lt 1 ]]; then
   echo "usage: scan_obfuscation.sh <repo_path>" >&2
   exit 64
@@ -22,13 +26,12 @@ if [[ ! -d "${REPO}" ]]; then
   exit 65
 fi
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Hits in plain documentation get a doc: prefix; the sub-agent decides if they matter.
-exec > >(python3 -I "${HERE}/doc_class.py" lines)
+{
 
 # 1) Encoded blocks (base64 / base32 / hex) with entropy check, and cross-line
 #    decode-then-execute detection. Done in Python for entropy + multi-line state.
-python3 - "${REPO}" <<'PYEOF'
+python3 -I - "${REPO}" <<'PYEOF'
 import math
 import os
 import re
@@ -100,10 +103,14 @@ for root, dirs, files in os.walk(repo):
         if fn in EXCLUDE_FILES:
             continue
         path = os.path.join(root, fn)
+        if os.path.islink(path):
+            print(f"skipped:symlink:{os.path.relpath(path, repo)}")
+            continue
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
         except (OSError, UnicodeDecodeError):
+            print(f"skipped:unreadable:{os.path.relpath(path, repo)}")
             continue
 
         decode_lines = []   # (lineno) where a decode primitive appears
@@ -184,3 +191,4 @@ for p in "${REVERSE_SHELL_PATTERNS[@]}"; do
     printf '%s:%s:reverse_shell:%s\n' "${path}" "${lineno}" "${d}"
   done < <(grep -RnE -I "${EXCLUDES[@]}" -e "${p}" "${REPO}" 2>/dev/null || true)
 done
+} | python3 -I "${HERE}/doc_class.py" lines "${REPO}"

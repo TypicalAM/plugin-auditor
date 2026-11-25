@@ -12,6 +12,10 @@
 
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib_status.sh
+source "${HERE}/lib_status.sh"
+
 if [[ $# -lt 1 ]]; then
   echo "usage: scan_network.sh <repo_path>" >&2
   exit 64
@@ -40,7 +44,7 @@ EXCLUDES=(
 )
 
 TMP="$(mktemp)"
-trap 'rm -f "${TMP}"' EXIT
+_HS_TMP="${TMP}"
 
 emit() {
   # emit <host> <path:lineno> <raw>
@@ -111,9 +115,8 @@ if [[ ! -s "${TMP}" ]]; then
   exit 0
 fi
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Hosts seen only in plain documentation aggregate under a doc: key.
-python3 -I "${HERE}/doc_class.py" host < "${TMP}" | sort -u \
+python3 -I "${HERE}/doc_class.py" host "${REPO}" < "${TMP}" | sort -u \
   | awk -F'\t' '
     {
       counts[$1]++

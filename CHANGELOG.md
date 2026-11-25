@@ -4,6 +4,16 @@ All notable changes to `plugin-auditor` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.2] - 2026-11-25
+
+### Fixed
+- `doc:` tagging classified on absolute paths, so an ancestor directory (an installed plugin under `~/.claude/plugins/`) suppressed every tag and made every file an artifact for the prose `config_write` rule. Classification now uses the path relative to the audited repo, in every helper.
+- Instruction files could be tagged `doc:`: names now match case-insensitively and include `CLAUDE.local.md`, `copilot-instructions.md`, `.cursorrules` and similar rule files; anything under `skills/` (references too) and other agents' rule directories counts as an instruction file.
+- A first-party `--index-url` no longer vouches for an `--extra-index-url` on the same line: `nondefault_index` fires unless every index URL is first-party.
+- `llm_router` parses the URL host, so `https://api.anthropic.com@<host>` is no longer read as first-party.
+- Helpers that exit non-zero or write to stderr print `helper_error:<helper>:rc=<n>:<first stderr line>`; the orchestrator records it, adds a `CAUTION` and a metadata warning, and the verdict cannot be clean.
+- Symlinks, oversized files, NUL files and unreadable or non-UTF-8 files were skipped silently. Helpers now print `skipped:<reason>:<relpath>`; sub-agents list these paths, the report metadata lists them, and a skipped hook, MCP config, settings file or manifest is a `CAUTION`. The `scan_secrets.sh` and `scan_obfuscation.sh` Python passes no longer follow file symlinks out of the repo.
+
 ## [0.4.1] - 2026-11-25
 
 ### Fixed

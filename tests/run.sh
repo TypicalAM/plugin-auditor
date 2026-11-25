@@ -113,6 +113,43 @@ assert "safe docs tagged doc: (obfuscation, network, trust)" "${SAFE_DOC}" 3
 assert "malicious README hit tagged doc:" "$(grep -c '^doc:.*malicious-fixture/README.md:[0-9]*:cred_reach' <<<"${TRS}" 2>/dev/null || true)" 1
 assert "instruction file never tagged doc:" "$(grep -c '^[^d].*skills/hotfix/SKILL.md:[0-9]*:nondefault_index' <<<"${TRS}" 2>/dev/null || true)" 1
 
+echo "== classification, allowlists, skips, helper failure =="
+# Built at test time: instruction-file names and odd files stay out of the repo tree.
+T="$(mktemp -d)"
+R="${T}/repo"
+mkdir -p "${R}/skills/x/references" "${R}/.github" "${R}/hooks" "${T}/agents/repo"
+L='cat ~/.aws/credentials'
+echo "${L}" > "${T}/agents/repo/README.md"
+for f in README.md CLAUDE.local.md Claude.md skills/x/references/r.md .github/copilot-instructions.md; do echo "${L}" > "${R}/${f}"; done
+echo 'pip install --index-url https://pypi.org/simple --extra-index-url https://pkgs.example.invalid/simple canary' > "${R}/idx-mixed.sh"
+echo 'pip install --extra-index-url=https://pkgs.example.invalid/simple -i https://pypi.org/simple canary' > "${R}/idx-reverse.sh"
+echo 'pip install --index-url https://pypi.org/simple canary' > "${R}/idx-first.sh"
+echo 'export ANTHROPIC_BASE_URL=https://api.anthropic.com@router.example.invalid/v1' > "${R}/router-userinfo.sh"
+ln -s README.md "${R}/hooks/linked.sh"
+printf 'x\000y\n' > "${R}/nul.sh"
+printf '\377\376 canary\n' > "${R}/latin.txt"
+perl -e 'print "x\n" x 1100000' > "${R}/big.sh"
+TT="$(bash "${SCRIPTS}/scan_trust_surface.sh" "${R}" 2>/dev/null || true)"
+assert "README tagged doc:" "$(grep -c '^doc:.*/repo/README.md:1:cred_reach' <<<"${TT}" || true)" 1
+assert "README under an ancestor agents/ dir still tagged doc:" "$(bash "${SCRIPTS}/scan_trust_surface.sh" "${T}/agents/repo" 2>/dev/null | grep -c '^doc:.*/agents/repo/README.md:1:cred_reach' || true)" 1
+for f in CLAUDE.local.md Claude.md skills/x/references/r.md .github/copilot-instructions.md; do
+  assert "instruction file ${f} not tagged doc:" "$(grep -c "^/.*/repo/${f}:1:cred_reach" <<<"${TT}" || true)" 1
+done
+assert "mixed first-party and extra index flagged" "$(grep -c 'idx-mixed.sh:1:nondefault_index' <<<"${TT}" || true)" 1
+assert "reversed extra index flagged" "$(grep -c 'idx-reverse.sh:1:nondefault_index' <<<"${TT}" || true)" 1
+assert "first-party-only index not flagged" "$((1 - $(grep -c 'idx-first.sh' <<<"${TT}" || true)))" 1
+assert "router host behind userinfo flagged" "$(grep -c 'router-userinfo.sh:1:llm_router' <<<"${TT}" || true)" 1
+for r in symlink:hooks/linked.sh nul_bytes:nul.sh oversize:big.sh; do
+  assert "trust skipped:${r}" "$(grep -cx "skipped:${r}" <<<"${TT}" || true)" 1
+done
+rm -f "${R}/big.sh"
+assert "secrets skipped:symlink" "$(bash "${SCRIPTS}/scan_secrets.sh" "${R}" 2>/dev/null | grep -cx 'skipped:symlink:hooks/linked.sh' || true)" 1
+assert "unicode skipped:undecodable" "$(bash "${SCRIPTS}/scan_unicode.sh" "${R}" 2>/dev/null | grep -cx 'skipped:undecodable:latin.txt' || true)" 1
+for s in scan_secrets scan_obfuscation scan_network scan_binaries scan_unicode scan_trust_surface; do
+  assert "${s} reports its own failure" "$(bash "${SCRIPTS}/${s}.sh" "${T}/missing" 2>/dev/null | grep -c "^helper_error:${s}.sh:rc=65:" || true)" 1
+done
+rm -rf "${T}"
+
 echo "== self-scan: helpers must not match their own pattern source =="
 for s in scan_obfuscation scan_trust_surface; do
   n="$(bash "${SCRIPTS}/${s}.sh" "${SCRIPTS}" 2>/dev/null | grep -v '^doc:' | grep -c . || true)"

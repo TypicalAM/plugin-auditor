@@ -5,11 +5,15 @@ context (pattern catalogues, changelogs, READMEs), not code that runs, but it is
 still reported so the sub-agent can read it and promote it when the doc tells a
 user or agent to run it.
 
-Documentation = markdown-family file that is NOT an instruction file the agent
-loads: SKILL.md, CLAUDE.md, AGENTS.md, GEMINI.md, anything under agents/,
-commands/, hooks/, output-styles/, .claude/, and any markdown whose YAML
-frontmatter has both name: and description:.
+Documentation = markdown-family file that is NOT an instruction file an agent
+loads: SKILL.md, CLAUDE.md, CLAUDE.local.md, AGENTS.md, GEMINI.md, agent rule
+files (.cursorrules, copilot-instructions.md, ...), anything under skills/,
+agents/, commands/, hooks/, output-styles/, .claude/, rule dirs of other agents,
+and any markdown whose YAML frontmatter has both name: and description:.
+Names and directories match case-insensitively, on the path relative to the
+audited repo root (an ancestor dir like ~/.claude/plugins must not count).
 
+Usage: doc_class.py <mode> <repo_root>
 Modes (stdin to stdout):
   lines  <path>:<rest>            becomes doc:<path>:<rest> for doc paths
   host   <host>\t<path:line>\t<raw> becomes doc:<host>\t... for doc paths
@@ -20,8 +24,14 @@ import re
 import sys
 
 DOC_EXT = {".md", ".mdx", ".markdown", ".rst", ".adoc"}
-INSTRUCTION_NAMES = {"SKILL.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md"}
-INSTRUCTION_DIRS = {"agents", "commands", "hooks", "output-styles", ".claude"}
+INSTRUCTION_NAMES = {
+    "skill.md", "claude.md", "claude.local.md", "agents.md", "agent.md", "gemini.md",
+    "copilot-instructions.md", ".cursorrules", ".windsurfrules", ".clinerules",
+}
+INSTRUCTION_DIRS = {
+    "skills", "agents", "commands", "hooks", "output-styles", ".claude",
+    ".cursor", ".windsurf", ".clinerules", ".roo", ".kiro", "instructions", "prompts",
+}
 _cache = {}
 
 
@@ -38,13 +48,20 @@ def has_artifact_frontmatter(path):
     return bool(re.search(r"^name\s*:", fm, re.M) and re.search(r"^description\s*:", fm, re.M))
 
 
-def is_doc(path):
+def relative(path, root):
+    if root and path.startswith(root + "/"):
+        return path[len(root):].lstrip("/")
+    return path
+
+
+def is_doc(path, root):
     if path in _cache:
         return _cache[path]
-    base = os.path.basename(path)
-    parts = set(path.replace("\\", "/").split("/")[:-1])
+    rel = relative(path, root).replace("\\", "/").lower()
+    base = os.path.basename(rel)
+    parts = set(rel.split("/")[:-1])
     doc = (
-        os.path.splitext(base)[1].lower() in DOC_EXT
+        os.path.splitext(base)[1] in DOC_EXT
         and base not in INSTRUCTION_NAMES
         and not (parts & INSTRUCTION_DIRS)
         and not has_artifact_frontmatter(path)
@@ -55,6 +72,7 @@ def is_doc(path):
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "lines"
+    root = sys.argv[2].rstrip("/") if len(sys.argv) > 2 else ""
     for line in sys.stdin:
         line = line.rstrip("\n")
         if not line:
@@ -62,12 +80,12 @@ def main():
         if mode == "host":
             host, loc, *rest = line.split("\t")
             path = loc.rsplit(":", 1)[0]
-            if is_doc(path) and not host.startswith("local:"):
+            if is_doc(path, root) and not host.startswith("local:"):
                 host = "doc:" + host
             print("\t".join([host, loc, *rest]))
         else:
             path = line.split(":", 1)[0]
-            print(("doc:" + line) if is_doc(path) else line)
+            print(("doc:" + line) if is_doc(path, root) else line)
 
 
 main()

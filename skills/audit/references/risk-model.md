@@ -260,7 +260,7 @@ Inert fixture findings collapse into one `CAUTION` per fixture directory ("plant
 
 ## Documentation hits
 
-The mechanical helpers prefix a hit with `doc:` when it sits in plain documentation: a `.md`/`.mdx`/`.markdown`/`.rst`/`.adoc` file that is not an instruction file (not `SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, nothing under `agents/`, `commands/`, `hooks/`, `output-styles/`, `.claude/`, and no `name:` + `description:` frontmatter). Pattern catalogues, changelogs and READMEs describe attacks without carrying them out.
+The mechanical helpers prefix a hit with `doc:` when it sits in plain documentation: a `.md`/`.mdx`/`.markdown`/`.rst`/`.adoc` file that is not an instruction file (not `SKILL.md`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `copilot-instructions.md`, `.cursorrules` and similar rule files, in any letter case; nothing under `skills/`, `agents/`, `commands/`, `hooks/`, `output-styles/`, `.claude/` or another agent's rule directory; and no `name:` + `description:` frontmatter). Paths are judged relative to the audited repository root. Pattern catalogues, changelogs and READMEs describe attacks without carrying them out.
 
 - A `doc:` hit whose context is descriptive (a detection rule, a catalogue entry, a changelog line, an example the text marks as malicious) → `OK`. The sub-agent names the file in one `OK` line so the cross-check still sees it.
 - A `doc:` hit that tells a user or an agent to run, fetch, install or configure the matched thing (an install step, a "paste this into settings" block, "ask your agent to read INSTALL.md and install") → judged exactly as if untagged.

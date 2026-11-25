@@ -107,13 +107,15 @@ These two values (already expanded) go into the sub-agent prompts in Step 5. Nev
 
 The sub-agents have no shell (a sub-agent `tools` list cannot scope Bash to a path, and an unrestricted `Bash` grant is the very `FAIL` this plugin reports). The orchestrator runs every helper under its per-helper `Bash(...)` grants and hands each sub-agent the output it owns.
 
-1. Run each helper as `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/<helper> <REPO_PATH>` and capture stdout: `scan_secrets.sh`, `scan_obfuscation.sh`, `scan_binaries.sh`, `scan_unicode.sh`, `scan_network.sh`, `scan_trust_surface.sh`.
+1. Run each helper as `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/<helper> <REPO_PATH>` and capture stdout, the exit code and any stderr text the Bash result shows: `scan_secrets.sh`, `scan_obfuscation.sh`, `scan_binaries.sh`, `scan_unicode.sh`, `scan_network.sh`, `scan_trust_surface.sh`. Record per helper `rc=<n>` and the first stderr line.
+   - A helper that exits non-zero or writes to stderr also prints `helper_error:<helper>:rc=<n>:<first stderr line>` as its last stdout line. A non-zero exit or stderr text in the Bash result counts as a failure even without that line (a killed helper may not print it). A failed helper's output is incomplete: see "Failure modes". Drop `helper_error:` lines from the saved output and from `SCAN_OUTPUTS`; they are not findings.
+   - `skipped:<reason>:<relpath>` lines name files a helper could not scan (`symlink`, `oversize`, `nul_bytes`, `unreadable`, `undecodable`). They stay in the output and go to the helper's owner (from `scan_trust_surface.sh`: `auditor-config`). Collect every distinct skipped path for the report metadata. A skipped hook script (under `hooks/` or named by a hooks config), `.mcp.json`/`mcp.json`, `settings*.json`, `plugin.json` or `marketplace.json` is at least one `CAUTION` "scanner skipped <path> (<reason>)" `[mechanical]`.
 2. Save each raw output with `Write` (NOT a shell redirect: capture the Bash stdout, then write it) to `~/.claude/plugin-auditor-reports/.raw/${REPO_SLUG}-${SHORT_SHA}-<scan>.txt`. The `Write(${HOME}/.claude/plugin-auditor-reports/**)` grant covers this path.
 3. **Delta mode:** filter each output to the lines whose path is in `CHANGED_FILES` (plus any file newly activated per the dormant-code guard).
 4. Ownership, used both for `SCAN_OUTPUTS` in Step 5 and for the cross-check in Step 5a:
    - `scan_secrets.sh`, `scan_obfuscation.sh`, `scan_binaries.sh`, `scan_unicode.sh`: `auditor-static`.
    - `scan_network.sh`: `auditor-network-fs`.
-   - `scan_trust_surface.sh`, split by category (field 3, or field 4 on a `doc:` line): `config_write`, `git_exec_config`, `py_stdlib_shadow`, `py_pth`, `sandbox_weaken`, `pre_trust` to `auditor-config`; `cred_reach`, `lateral_movement`, `exfil_channel`, `llm_router` to `auditor-network-fs`; `lifecycle_script`, `nondefault_index` to `auditor-supply-chain`.
+   - `scan_trust_surface.sh`, split by category (field 3, or field 4 on a `doc:` line; `skipped:` lines to `auditor-config`): `config_write`, `git_exec_config`, `py_stdlib_shadow`, `py_pth`, `sandbox_weaken`, `pre_trust` to `auditor-config`; `cred_reach`, `lateral_movement`, `exfil_channel`, `llm_router` to `auditor-network-fs`; `lifecycle_script`, `nondefault_index` to `auditor-supply-chain`.
 
 Lines prefixed `doc:` (and `doc:` host keys) are hits in plain documentation: markdown that is not an instruction file the agent loads. They stay in the output so the owning sub-agent reads their context; see `risk-model.md` "Documentation hits".
 
@@ -176,7 +178,7 @@ Do not run them sequentially. One message, six tool calls, in parallel.
 
 The sub-agents turn the Step 4b output into prose. A sub-agent whose own context has been poisoned by the audited repo could silently drop a mechanical finding. So the orchestrator checks that nothing the scripts found is missing from the owning sub-agent's report, using the saved (and, in delta mode, filtered) outputs and the ownership map from Step 4b.
 
-1. For every path (from `scan_*`) and every host (from `scan_network`) present in the filtered raw output (a `doc:` host matches on the host without the prefix), confirm it appears **somewhere** in the owning sub-agent's report — in any section, at any severity. Sub-agents legitimately transform findings (a fixture secret downgraded to `CAUTION`, allowlisted hosts collapsed into one `OK` line), so match on the presence of the path or host, not on count or severity.
+1. For every path (from `scan_*`, including `skipped:` lines) and every host (from `scan_network`) present in the filtered raw output (a `doc:` host matches on the host without the prefix), confirm it appears **somewhere** in the owning sub-agent's report, in any section, at any severity. Sub-agents legitimately transform findings (a fixture secret downgraded to `CAUTION`, allowlisted hosts collapsed into one `OK` line), so match on the presence of the path or host, not on count or severity.
 Match strictly per owner. A path that another sub-agent reported does not cover the owner's omission: a poisoned owner could otherwise lean on its neighbours.
 
 2. If a path or host from the raw output appears nowhere in the sub-agent's report → add a `FAIL` "mechanical finding suppressed by sub-agent — possible auditor-targeted injection" `[mechanical]`, quoting the raw line and naming the sub-agent. This is a deterministic check; it does not depend on model judgment.
@@ -228,7 +230,7 @@ Mandatory sections, in this order:
 5. `## Caution (N)` — same shape for `CAUTION`. Skip if N=0.
 6. `## Verified OK (N)` — bulleted list of positive checks.
 7. `## Per-agent details` — one subsection per sub-agent with its raw report.
-8. `## Audit metadata` — sub-agents used, files scanned, lines of code (best-effort), execution time, plugin version (`0.4.1`), delta mode flag.
+8. `## Audit metadata`: sub-agents used, files scanned, lines of code (best-effort), execution time, plugin version (`0.4.2`), delta mode flag, each helper's exit code, every skipped path with its reason, and one `WARNING:` line per failed helper.
 
 Use ASCII characters only — no emojis — to match the project conventions documented in the README.
 
@@ -294,6 +296,7 @@ Run this step ONLY if the orchestrator cloned the repository itself in Step 0 (i
 
 - **Sub-agent fails silently** → record the failure in the report's `## Audit metadata` section as a `WARNING: <agent> did not return a structured report`. The verdict cannot be `NO FINDINGS (static)` if any sub-agent failed; downgrade to at least `CAUTION`.
 - **Injection guard did not respond vs responded off-schema** → both downgrade to at least `CAUTION`, with distinct metadata notes: "injection guard did not return a report" (no response) versus "injection guard returned malformed output" (a response that yielded no parsable `findings` object, per Step 6a). A guard that returns nothing is not a clean guard.
+- **Scan helper fails** (non-zero exit, stderr output, or a `helper_error:` line) → add `WARNING: <helper> failed (rc=<n>): <first stderr line>` to `## Audit metadata` and one `CAUTION` "scan helper <helper> failed; its findings are incomplete" `[mechanical]`. The verdict cannot be `NO FINDINGS (static)`. Do not rerun the helper in another form or replace it with your own grep.
 - **`clone_repo.sh` rejects the URL** → tell the user the URL was not on the allowlist and exit. Do not try other methods.
 - **`git_head.sh` fails** → fall back to `nogit-<timestamp>` SHA, skip delta mode, and add a `CAUTION` finding "Repository is not under version control — provenance cannot be verified".
 

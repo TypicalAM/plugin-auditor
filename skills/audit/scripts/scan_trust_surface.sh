@@ -7,7 +7,8 @@
 # that run before trust, credential reach, lateral movement, non-HTTP exfil
 # channels, third-party model routers and non-default package indexes.
 #
-# Output: <path>:<line>:<category>:<excerpt>, one per line.
+# Output: <path>:<line>:<category>:<excerpt>, one per line, and
+#         skipped:<reason>:<relpath> for files it could not read.
 # Owners (for the orchestrator's mechanical cross-check):
 #   auditor-config        config_write git_exec_config py_stdlib_shadow py_pth
 #                         sandbox_weaken pre_trust
@@ -17,6 +18,10 @@
 # Read-only. Never executes or modifies anything in the repository.
 
 set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib_status.sh
+source "${HERE}/lib_status.sh"
 
 if [[ $# -lt 1 ]]; then
   echo "usage: scan_trust_surface.sh <repo_path>" >&2
@@ -29,15 +34,13 @@ if [[ ! -d "${REPO}" ]]; then
   exit 65
 fi
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Hits in plain documentation get a doc: prefix; the sub-agent decides if they matter.
-exec > >(python3 -I "${HERE}/doc_class.py" lines)
-
-python3 -I - "${REPO}" <<'PYEOF'
+python3 -I - "${REPO}" <<'PYEOF' | python3 -I "${HERE}/doc_class.py" lines "${REPO}"
 import json
 import os
 import re
 import sys
+from urllib.parse import urlsplit
 
 repo = sys.argv[1].rstrip("/")
 EXCLUDE_DIRS = {".git", "node_modules", "vendor", "dist", "build", ".venv", "__pycache__"}
@@ -56,6 +59,10 @@ def emit(path, lineno, cat, text):
     seen.add(key)
     excerpt = " ".join(text.strip().split())[:160]
     print(f"{path}:{lineno}:{cat}:{excerpt}")
+
+
+def skip(full, reason):
+    print(f"skipped:{reason}:{os.path.relpath(full, repo)}")
 
 
 def line_of(lines, needle):
@@ -138,12 +145,30 @@ LINE_RULES = [
         r"\bInstall-(Module|Package|PSResource)\b[^\n]*-Repository|\bRegister-PS(Repository|ResourceRepository)\b|"
         r"\bgem\s+install\b[^\n]*--source", re.I)),
 ]
-FIRST_PARTY_INDEX = re.compile(r"(--index-url|--registry|-i)[\s=]+https[:]//(pypi\.org|registry\.npmjs\.org)/")
+# Every index option on the line, so a first-party --index-url cannot vouch for an --extra-index-url.
+INDEX_OPT = re.compile(r"(?:--index-url|--extra-index-url|--registry|(?<![\w-])-i)(?:\s+|=)[\"']?([^\s\"']+)")
+FIRST_PARTY_INDEX_HOSTS = {"pypi.org", "registry.npmjs.org"}
 ROUTER_RE = re.compile(
     r"\b(ANTHROPIC_BASE_URL|ANTHROPIC_BEDROCK_BASE_URL|ANTHROPIC_VERTEX_BASE_URL|OPENAI_BASE_URL|OPENAI_API_BASE)\b"
-    r"[^\n]*?https?://([A-Za-z0-9.-]+)")
+    r"[^\n]*?(https?://[^\s\"'<>`]+)")
 # Loopback is the user's own proxy or a test stub, not a third-party router.
 FIRST_PARTY_MODEL = {"api.anthropic.com", "api.openai.com", "localhost", "127.0.0.1"}
+
+
+def url_host(url):
+    # hostname drops userinfo and port: https://api.anthropic.com@evil.example.invalid is evil.example.invalid.
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def first_party_index(line):
+    urls = INDEX_OPT.findall(line)
+    return bool(urls) and all(
+        u.lower().startswith("https://") and url_host(u) in FIRST_PARTY_INDEX_HOSTS for u in urls)
+
+
 LIFECYCLE = {"preinstall", "install", "postinstall", "prepare", "prepack", "postpack", "prepublish", "preuninstall", "postuninstall"}
 
 GIT_KEYS = {
@@ -244,27 +269,31 @@ def scan_package_json(rel, lines, data):
 
 
 def scan_file(full, rel):
+    # rel (relative to the repo root) drives classification; output keeps the full path.
     base = os.path.basename(rel)
     stem, ext = os.path.splitext(base)
     if ext == ".pth":
-        emit(rel, 1, "py_pth", f"{base} (runs at every interpreter start when installed into site-packages)")
+        emit(full, 1, "py_pth", f"{base} (runs at every interpreter start when installed into site-packages)")
     if ext == ".py" and (stem in ALWAYS_SHADOW or (
             stem in STDLIB and not os.path.exists(os.path.join(os.path.dirname(full), "__init__.py")))):
-        emit(rel, 1, "py_stdlib_shadow", f"{base} shadows stdlib module '{stem}' for scripts run from this directory")
+        emit(full, 1, "py_stdlib_shadow", f"{base} shadows stdlib module '{stem}' for scripts run from this directory")
     try:
         if os.path.getsize(full) > MAX_BYTES:
+            skip(full, "oversize")
             return
         with open(full, "rb") as f:
             raw = f.read()
     except OSError:
+        skip(full, "unreadable")
         return
     if b"\0" in raw[:4096]:
+        skip(full, "nul_bytes")
         return
     text = raw.decode("utf-8", errors="ignore")
     lines = text.splitlines()
 
     if re.search(r"(^|/)(\.git|dot-git)/config$", rel) or base in {".gitconfig", "gitconfig"} or base.endswith(".gitconfig"):
-        scan_git_config(rel, lines)
+        scan_git_config(full, lines)
     if ext == ".json":
         try:
             data = json.loads(text)
@@ -272,25 +301,25 @@ def scan_file(full, rel):
             data = None
         if data is not None:
             if re.match(r"^(settings[\w.-]*|managed-settings|hooks)\.json$", base):
-                scan_settings(rel, lines, data)
+                scan_settings(full, lines, data)
             if base in {".mcp.json", "mcp.json", "dot-mcp.json"}:
-                scan_mcp(rel, lines, data)
+                scan_mcp(full, lines, data)
             if base == "package.json":
-                scan_package_json(rel, lines, data)
+                scan_package_json(full, lines, data)
 
     is_artifact = bool(ARTIFACT_RE.search(rel))
     prose = re.compile(rf"{PROSE_WRITE}.*{TRUSTED_TARGET}", re.I) if is_artifact else None
     for n, line in enumerate(lines, start=1):
         for cat, rx in LINE_RULES:
             if rx.search(line):
-                if cat == "nondefault_index" and FIRST_PARTY_INDEX.search(line):
+                if cat == "nondefault_index" and first_party_index(line):
                     continue
-                emit(rel, n, cat, line)
+                emit(full, n, cat, line)
         if prose and prose.search(line):
-            emit(rel, n, "config_write", line)
+            emit(full, n, "config_write", line)
         m = ROUTER_RE.search(line)
-        if m and m.group(2).lower() not in FIRST_PARTY_MODEL:
-            emit(rel, n, "llm_router", line)
+        if m and url_host(m.group(2)) not in FIRST_PARTY_MODEL:
+            emit(full, n, "llm_router", line)
 
 
 for root, dirs, files in os.walk(repo):
@@ -300,12 +329,15 @@ for root, dirs, files in os.walk(repo):
             continue
         full = os.path.join(root, fn)
         if os.path.islink(full):
+            skip(full, "symlink")
             continue
-        scan_file(full, full)
+        scan_file(full, os.path.relpath(full, repo))
 
 # A shipped .git/config (tarball, zip, vendored checkout) runs on the agent's own git status.
 gc = os.path.join(repo, ".git", "config")
-if os.path.isfile(gc) and not os.path.islink(gc):
+if os.path.islink(gc):
+    skip(gc, "symlink")
+elif os.path.isfile(gc):
     with open(gc, "r", encoding="utf-8", errors="ignore") as f:
         scan_git_config(gc, f.read().splitlines())
 PYEOF
