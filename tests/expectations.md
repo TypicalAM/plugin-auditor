@@ -19,6 +19,11 @@ private RFC1918 addresses and a Bearer placeholder (`docs/networking.md`), and a
 `local:`-prefixed RFC1918 hosts are context, not findings, so the safe check filters
 them before counting.
 
+Lines prefixed `doc:` are documentation context, not findings: `docs/threat-notes.md`
+names a reverse shell, a dynamic-DNS URL and a git fsmonitor command, and every helper
+must tag those lines `doc:` (asserted: at least 3 tagged lines). Malicious-fixture counts
+exclude `doc:` lines, so a detector that only fires in documentation does not pass.
+
 ## malicious-fixture
 
 Minimum finding counts per helper. `run.sh` asserts `actual >= expected` so adding

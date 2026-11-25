@@ -4,7 +4,7 @@ Static security audit for projects extending Claude (skills, agents, hooks, plug
 
 **Author**: Piotr Kaźmierczak - CEO [Secawa](https://secawa.com) \
 **License**: MIT \
-**Version**: 0.4.0
+**Version**: 0.4.1
 
 ---
 
@@ -36,7 +36,7 @@ The plugin never executes audited code. It only reads, greps, and reasons.
    ```bash
    /plugin
    ```
-   `plugin-auditor` should appear with version `0.4.0`. Type `/` and start typing `plug`, and the entry `/plugin-auditor:audit` should be listed in the slash menu.
+   `plugin-auditor` should appear with version `0.4.1`. Type `/` and start typing `plug`, and the entry `/plugin-auditor:audit` should be listed in the slash menu.
 4. The first audit will create `~/.claude/plugin-auditor-reports/` automatically. No other system files are touched.
 
 ---
@@ -251,10 +251,8 @@ Plugin-auditor itself runs inside Claude Code with elevated trust — it reads y
 **Tools the plugin grants itself** (declared in `agents/*.md` and `skills/audit/SKILL.md`):
 
 - `Read`, `Grep`, `Glob` — every component, every audit. Read-only inspection.
-- `Bash` — only for two narrow uses:
-  - the orchestrating skill runs `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/*` (helper scripts shipped with the plugin) and `git -C * rev-parse HEAD` (no other git verbs are pre-approved);
-  - sub-agents `auditor-static`, `auditor-supply-chain`, `auditor-network-fs`, `auditor-config` keep `Bash` in their allowlist for grep/find/awk/python invocations against the audited repository, plus the helper scripts above.
-  - `auditor-claude-artifacts` and `auditor-injection-guard` deliberately have **no** `Bash` at all — the two passes that read the most adversarial input (LLM-steering artifacts) get `Read`/`Grep`/`Glob` only, so a compromised prompt cannot reach a shell.
+- `Bash` (orchestrator only): `bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/*`, the helper scripts shipped with the plugin. No direct git call is pre-approved; `git_head.sh` and `compute_delta.sh` run git with the target's exec-capable config (`core.fsmonitor`, `core.hooksPath`, `core.pager`, `diff.external`...) pinned to inert values.
+  - No sub-agent has `Bash`. A sub-agent `tools` list cannot scope Bash to a path, so the orchestrator runs the helpers and passes their output in; every sub-agent only has `Read`, `Grep` and `Glob`, and a compromised prompt cannot reach a shell.
 - `Agent` — the orchestrator only. Used to fan out to the six sub-agents in parallel. Sub-agents themselves cannot spawn further sub-agents (a Claude Code platform limit, not just policy).
 - `Write` — the orchestrator only, restricted to `${HOME}/.claude/plugin-auditor-reports/**`. Reports and the delta-mode state file land there; no other path is pre-approved.
 - `AskUserQuestion` — the orchestrator only. Used for the post-report drill-down prompt.

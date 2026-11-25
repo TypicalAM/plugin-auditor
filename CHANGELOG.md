@@ -4,6 +4,16 @@ All notable changes to `plugin-auditor` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] - 2026-11-25
+
+### Fixed
+- No sub-agent has `Bash` any more (an unrestricted `Bash` grant is a `FAIL` under this plugin's own rules, and agent `tools` cannot scope it to a path). The orchestrator runs every helper (new Step 4b) and passes each sub-agent its output as `SCAN_OUTPUTS`.
+- Git on the audited repository runs through `lib_git.sh`, which pins `core.fsmonitor`, `core.hooksPath`, `core.pager`, `core.sshCommand`, `diff.external` and `credential.helper` to inert values and ignores system/global config. `git_head.sh` replaces the direct `git -C * rev-parse HEAD` grant; `compute_delta.sh` uses the wrapper too.
+- Self-scan noise: hits in plain documentation get a `doc:` prefix (`doc_class.py`; instruction files are never tagged, secrets and Unicode never tagged), and the helpers' own pattern sources no longer match themselves. Tighter DNS-tool host extraction.
+
+### Added
+- Regression checks: documentation tagging, helpers scanning their own source, no agent lists `Bash`, and a booby-trapped `.git/config` that must fire no canary through the git wrapper.
+
 ## [0.4.0] - 2026-11-25
 
 Coverage for the 2026 agent attack patterns: a write that becomes a later execute, git

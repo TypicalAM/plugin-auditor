@@ -248,6 +248,15 @@ A few combinations escalate beyond the per-pattern severity:
 
 When a finding involves credentials an MCP server, hook or skill holds or reaches, the report's **Recommendation** names the narrower alternative: a read-only or project-scoped token, and short-lived credentials (AWS STS `GetScopedCredentials`, or `AssumeRole` with a session policy and a short duration; fine-grained GitHub tokens with an expiry). Do not stop at "remove the token".
 
+## Documentation hits
+
+The mechanical helpers prefix a hit with `doc:` when it sits in plain documentation: a `.md`/`.mdx`/`.markdown`/`.rst`/`.adoc` file that is not an instruction file (not `SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, nothing under `agents/`, `commands/`, `hooks/`, `output-styles/`, `.claude/`, and no `name:` + `description:` frontmatter). Pattern catalogues, changelogs and READMEs describe attacks without carrying them out.
+
+- A `doc:` hit whose context is descriptive (a detection rule, a catalogue entry, a changelog line, an example the text marks as malicious) → `OK`. The sub-agent names the file in one `OK` line so the cross-check still sees it.
+- A `doc:` hit that tells a user or an agent to run, fetch, install or configure the matched thing (an install step, a "paste this into settings" block, "ask your agent to read INSTALL.md and install") → judged exactly as if untagged.
+- `scan_secrets.sh` and `scan_unicode.sh` never tag: a live key or hidden characters in a README are findings wherever they sit.
+- Hits in instruction files are never tagged. A detection rule written in an agent prompt is still judged on context by the sub-agent, not waved through by path.
+
 ## Artifact file set (single source of truth)
 
 Several passes need the same definition of "an artifact that steers an LLM". The injection guard scans exactly this set, the unicode FAIL rule applies inside it, and `auditor-claude-artifacts` enumerates it:

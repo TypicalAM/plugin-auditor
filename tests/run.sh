@@ -23,8 +23,8 @@ FAIL=0
 green() { printf '  ok   %s\n' "$1"; PASS=$((PASS + 1)); }
 red()   { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
-# count_cat <output> <category-substring>
-count_cat() { grep -c -- "$2" <<<"$1" 2>/dev/null || true; }
+# count_cat <output> <category-substring>: counts non-doc hits only.
+count_cat() { grep -v '^doc:' <<<"$1" | grep -c -- "$2" 2>/dev/null || true; }
 
 echo "== safe-fixture: expect zero findings from every helper =="
 for s in scan_secrets scan_obfuscation scan_network scan_binaries scan_unicode scan_trust_surface; do
@@ -35,6 +35,8 @@ for s in scan_secrets scan_obfuscation scan_network scan_binaries scan_unicode s
   if [[ "${s}" == "scan_network" ]]; then
     out="$(grep -v '^local:' <<<"${out}" 2>/dev/null || true)"
   fi
+  # doc: lines are documentation context (docs/threat-notes.md), not findings.
+  out="$(grep -v '^doc:' <<<"${out}" 2>/dev/null || true)"
   n="$(grep -c . <<<"${out}" 2>/dev/null || true)"
   # grep -c on empty input returns 0 but with a trailing state; normalise.
   [[ -z "${out}" ]] && n=0
@@ -101,8 +103,45 @@ for c in config_write git_exec_config py_stdlib_shadow py_pth sandbox_weaken pre
 done
 assert "trust gitspawn fsmonitor" "$(grep -c 'dot-git/config:[0-9]*:git_exec_config:fsmonitor' <<<"${TRS}" 2>/dev/null || true)" 1
 assert "trust settings.local.json write" "$(grep -c 'vendor-sync.sh:[0-9]*:config_write:.*settings.local.json' <<<"${TRS}" 2>/dev/null || true)" 1
-assert "trust npm prepare swap" "$(grep -c 'config_write:npm pkg set scripts.prepare' <<<"${TRS}" 2>/dev/null || true)" 1
-assert "trust docker.sock" "$(grep -c 'sandbox_weaken:.*docker.sock' <<<"${TRS}" 2>/dev/null || true)" 2
+assert "trust npm prepare swap" "$(grep -c 'config_write:npm pkg set scripts[.]prepare' <<<"${TRS}" 2>/dev/null || true)" 1
+assert "trust docker socket" "$(grep -c 'sandbox_weaken:.*docker[.]sock' <<<"${TRS}" 2>/dev/null || true)" 2
+
+
+echo "== documentation tagging =="
+SAFE_DOC="$( (bash "${SCRIPTS}/scan_obfuscation.sh" "${SAFE}"; bash "${SCRIPTS}/scan_network.sh" "${SAFE}"; bash "${SCRIPTS}/scan_trust_surface.sh" "${SAFE}") 2>/dev/null | grep -c '^doc:' || true)"
+assert "safe docs tagged doc: (obfuscation, network, trust)" "${SAFE_DOC}" 3
+assert "malicious README hit tagged doc:" "$(grep -c '^doc:.*malicious-fixture/README.md:[0-9]*:cred_reach' <<<"${TRS}" 2>/dev/null || true)" 1
+assert "instruction file never tagged doc:" "$(grep -c '^[^d].*skills/hotfix/SKILL.md:[0-9]*:nondefault_index' <<<"${TRS}" 2>/dev/null || true)" 1
+
+echo "== self-scan: helpers must not match their own pattern source =="
+for s in scan_obfuscation scan_trust_surface; do
+  n="$(bash "${SCRIPTS}/${s}.sh" "${SCRIPTS}" 2>/dev/null | grep -v '^doc:' | grep -c . || true)"
+  if [[ "${n}" -eq 0 ]]; then green "${s} on scripts/: 0"; else red "${s} on scripts/: ${n}"; fi
+done
+
+echo "== sub-agents have no shell =="
+n="$(grep -lE '^tools:.*\bBash\b' "${ROOT}"/agents/*.md 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "${n}" -eq 0 ]]; then green "no agent lists Bash in tools"; else red "${n} agent(s) list Bash in tools"; fi
+
+echo "== git on the target runs with exec-capable config pinned =="
+TRAP="$(mktemp -d)"
+(
+  cd "${TRAP}" && mkdir repo hooks && cd repo && git init -q \
+    && git -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m one \
+    && echo x > f && git add f && git -c user.email=t@example.invalid -c user.name=t commit -q -m two
+) >/dev/null 2>&1
+for k in fsmonitor diff pager hook; do printf '#!/bin/sh\ntouch "%s/fired-%s"\n' "${TRAP}" "${k}" > "${TRAP}/${k}.sh"; chmod +x "${TRAP}/${k}.sh"; done
+cp "${TRAP}/hook.sh" "${TRAP}/hooks/post-checkout"
+printf '[core]\n\tfsmonitor = %s/fsmonitor.sh\n\thooksPath = %s/hooks\n\tpager = %s/pager.sh\n[diff]\n\texternal = %s/diff.sh\n' \
+  "${TRAP}" "${TRAP}" "${TRAP}" "${TRAP}" >> "${TRAP}/repo/.git/config"
+PREV="$(git -C "${TRAP}/repo" -c core.fsmonitor=false rev-parse HEAD~1 2>/dev/null)"
+bash "${SCRIPTS}/git_head.sh" "${TRAP}/repo" >/dev/null 2>&1 || true
+bash "${SCRIPTS}/compute_delta.sh" "${TRAP}/repo" "${PREV}" >/dev/null 2>&1 || true
+# status and a full diff do reach fsmonitor, pager and diff.external, so they prove the wrapper.
+( source "${SCRIPTS}/lib_git.sh"; git_safe -C "${TRAP}/repo" status; git_safe -C "${TRAP}/repo" diff HEAD~1 ) >/dev/null 2>&1 || true
+fired="$(find "${TRAP}" -maxdepth 1 -name 'fired-*' | wc -l | tr -d ' ')"
+if [[ "${fired}" -eq 0 ]]; then green "git_safe wrapper, git_head.sh, compute_delta.sh fired no canary"; else red "${fired} canary command(s) ran"; fi
+rm -rf "${TRAP}"
 
 echo
 echo "== summary =="

@@ -22,6 +22,10 @@ if [[ ! -d "${REPO}" ]]; then
   exit 65
 fi
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Hits in plain documentation get a doc: prefix; the sub-agent decides if they matter.
+exec > >(python3 -I "${HERE}/doc_class.py" lines)
+
 # 1) Encoded blocks (base64 / base32 / hex) with entropy check, and cross-line
 #    decode-then-execute detection. Done in Python for entropy + multi-line state.
 python3 - "${REPO}" <<'PYEOF'
@@ -50,7 +54,7 @@ HEX_RUN = re.compile(r"(?:0x)?[0-9a-fA-F]{%d,}" % MIN_BLOB)
 # bytes([...]) is narrowed to a numeric byte-list of at least 8 elements so an
 # ordinary bytes([0]) does not read as a payload builder.
 DECODE_RE = re.compile(
-    r"b64decode|b32decode|base64_decode|unhexlify|fromhex|"
+    r"b64[d]ecode|b32[d]ecode|base64_[d]ecode|unhexlif[y]|fromhe[x]|"
     r"zlib\.decompress|gzip\.decompress|lzma\.decompress|"
     r"Buffer\.from\s*\([^)]*base64|atob\s*\(|"
     r"String\.fromCharCode|bytes\s*\(\s*\[\s*(?:\d+\s*,\s*){7,}",
@@ -75,7 +79,7 @@ EXEC_RE = re.compile(
 HASH_CONTEXT = re.compile(r"sha1|sha256|sha512|integrity|checksum|digest|hash", re.IGNORECASE)
 DIGEST_WIDTHS = {40, 64, 128}
 # Same-line decode->exec (kept for the tight classic form).
-SAME_LINE = re.compile(r"(exec|eval|system|popen|spawn|Function)\s*\(.*(b64decode|b32decode|unhexlify|decompress|atob|fromCharCode)", re.IGNORECASE)
+SAME_LINE = re.compile(r"(exec|eval|system|popen|spawn|Function)\s*\(.*(b64[d]ecode|b32[d]ecode|unhexlif[y]|decompres[s]|ato[b]|fromCharCod[e])", re.IGNORECASE)
 
 def entropy(s):
     if not s:
@@ -162,19 +166,21 @@ EXCLUDES=(
   --exclude-dir=__pycache__
 )
 
+# Bracketed first char: same match, but this file does not match itself.
 REVERSE_SHELL_PATTERNS=(
-  'bash -i >& /dev/tcp/'
-  'sh -i >& /dev/tcp/'
-  'bash -c .*dev/tcp'
-  'nc -e /bin/sh'
-  'nc -e /bin/bash'
-  'ncat -e /bin/sh'
-  'socat exec:'
-  'New-Object System.Net.Sockets.TCPClient'
+  '[b]ash -i >& /dev/tcp/'
+  '(^|[^a-z])[s]h -i >& /dev/tcp/'
+  '[b]ash -c .*dev/tcp'
+  '[n]c -e /bin/sh'
+  '[n]c -e /bin/bash'
+  '[n]cat -e /bin/sh'
+  '[s]ocat exec:'
+  '[N]ew-Object System.Net.Sockets.TCPClient'
 )
 for p in "${REVERSE_SHELL_PATTERNS[@]}"; do
   while IFS= read -r line; do
     path="${line%%:*}"; rest="${line#*:}"; lineno="${rest%%:*}"
-    printf '%s:%s:reverse_shell:%s\n' "${path}" "${lineno}" "${p}"
+    d="${p#'(^|[^a-z])'}"; d="${d//[\[\]]/}"
+    printf '%s:%s:reverse_shell:%s\n' "${path}" "${lineno}" "${d}"
   done < <(grep -RnE -I "${EXCLUDES[@]}" -e "${p}" "${REPO}" 2>/dev/null || true)
 done

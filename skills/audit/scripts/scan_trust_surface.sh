@@ -29,6 +29,10 @@ if [[ ! -d "${REPO}" ]]; then
   exit 65
 fi
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Hits in plain documentation get a doc: prefix; the sub-agent decides if they matter.
+exec > >(python3 -I "${HERE}/doc_class.py" lines)
+
 python3 -I - "${REPO}" <<'PYEOF'
 import json
 import os
@@ -101,40 +105,40 @@ LINE_RULES = [
         r"diff\.[\w.-]+\.(textconv|command)|filter\.[\w.-]+\.(clean|smudge|process)|"
         r"merge\.[\w.-]+\.driver|credential\.helper|include\.path)", re.I)),
     ("git_exec_config", re.compile(r"\bGIT_(SSH_COMMAND|EXTERNAL_DIFF|PAGER|ASKPASS|CONFIG_GLOBAL|CONFIG_PARAMETERS)\s*=(?![\"']?(/dev/null|true|false|cat|0|1)?[\"']?(\s|$))")),
-    ("py_pth", re.compile(r"(site-packages|dist-packages|getsitepackages|USER_SITE)[^\n]*\.pth\b|\.pth\b[^\n]*(site-packages|dist-packages)")),
+    ("py_pth", re.compile(r"(site-packages|dist-packages|getsitepackages|USER_SITE)[^\n]*\.p[t]h\b|\.p[t]h\b[^\n]*(site-packages|dist-packages)")),
     ("py_pth", re.compile(rf"{CODE_WRITE}[^\n]*(sitecustomize|usercustomize)\.py")),
     ("sandbox_weaken", re.compile(
-        r"dangerouslyDisableSandbox|--dangerously-skip-permissions|"
+        r"dangerouslyDisableSandbo[x]|--dangerously-skip-permission[s]|"
         r"(defaultMode[\"']?\s*[:=]\s*[\"']?|--permission-mode[\s=]+)bypassPermissions|"
-        r"allowUnsandboxedCommands[\"']?\s*[:=]\s*true|skipDangerousModePermissionPrompt|"
-        r"docker\.sock|--privileged\b|"
+        r"allowUnsandboxedCommands[\"']?\s*[:=]\s*true|skipDangerousModePermissionPromp[t]|"
+        r"docker\.sock|--privilege[d]\b|"
         r"(-v|--volume|--mount)[\s=]+[\"']?(\$HOME|\$\{HOME\}|~|/Users/[\w.-]+|/home/[\w.-]+|/root)/?[\"']?:")),
-    ("pre_trust", re.compile(r"enableAllProjectMcpServers[\"']?\s*[:=]\s*true|enabledMcpjsonServers")),
+    ("pre_trust", re.compile(r"enableAllProjectMcpServers[\"']?\s*[:=]\s*true|enabledMcpjsonServer[s]")),
     ("cred_reach", re.compile(
         r"(~|\$HOME|\$\{HOME\}|homedir\(\)|expanduser\([\"']~)[/\"', +]*\.(aws|ssh|kube|azure|docker/config\.json|netrc|pgpass|git-credentials|config/(gh|gcloud))|"
-        r"\.ssh/id_|\bgh\s+auth\s+token\b|\bsecurity\s+(find-generic-password|find-internet-password|dump-keychain)|"
-        r"\bsecret-tool\s+lookup|Login Data|Cookies\.sqlite|key4\.db|Application Support/(Google/Chrome|BraveSoftware|Firefox|Microsoft Edge)|"
-        r"\.mozilla/firefox|\baws\s+configure\s+(export-credentials|get)|gcloud\s+auth\s+print-access-token|"
+        r"\.ssh/i[d]_|\bgh\s+auth\s+token\b|\bsecurity\s+(find-generic-password|find-internet-password|dump-keychain)|"
+        r"\bsecret-tool\s+lookup|Login Dat[a]|Cookies\.sqlite|key4\.db|Application Support/(Google/Chrome|BraveSoftware|Firefox|Microsoft Edge)|"
+        r"\.mozill[a]/firefox|\baws\s+configure\s+(export-credentials|get)|gcloud\s+auth\s+print-access-token|"
         r"az\s+account\s+get-access-token|(\bcat|\bsource|load_dotenv\(|readFile\w*\(|open\()[^\n]*['\" /]\.env\b|"
         r"\$\{?(GITHUB_TOKEN|GH_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|NPM_TOKEN)\b")),
     ("lateral_movement", re.compile(
         r"(^|[\s;&|(`$\"'])ssh\s+(-\S+\s+)*[\w.-]+@[\w.-]+|\b(scp|sftp|rsync)\s[^\n]*?[\w.-]+@[\w.-]+:|"
-        r"\b(Invoke-Command|Enter-PSSession|New-PSSession)\b|\baws\s+ssm\s+(send-command|start-session)|"
+        r"\b(Invoke-Comman[d]|Enter-PSSessio[n]|New-PSSessio[n])\b|\baws\s+ssm\s+(send-command|start-session)|"
         r"\bgcloud\s+compute\s+ssh|\baz\s+(vm\s+run-command|ssh\s+vm)|\bkubectl\s+(exec|cp)\b|\bdocker\s+-H\s|"
-        r"claude-in-chrome|--remote-debugging-port|launchPersistentContext|user-data-dir", re.I)),
+        r"claude-in-chrom[e]|--remote-debugging-por[t]|launchPersistentContex[t]|user-data-di[r]", re.I)),
     ("exfil_channel", re.compile(
         r"\bgit\s+push\s+(-\S+\s+)*(https?://|git@|ssh://)|\bgit\s+remote\s+(add|set-url)\s+\S+\s+(https?://|git@|ssh://)|"
         r"\baws\s+s3\s+(cp|sync|mv)\b|\bs3api\s+put-object|\bgsutil\s+(cp|rsync|mv)\b|\bgcloud\s+storage\s+(cp|rsync)\b|"
         r"\baz\s+storage\s+blob\s+upload|\brclone\s+(copy|sync|move)\b|\bgh\s+gist\s+create|\bgh\s+issue\s+(create|comment)|"
         r"\bgh\s+api\s[^\n]*(gists|/issues)|api\.github\.com/gists|hooks\.slack\.com/|discord(app)?\.com/api/webhooks|"
-        r"webhook\.site|pastebin\.com|transfer\.sh|requestbin|\binteract\.sh|\.oast\.")),
+        r"webhook\.site|pastebin\.com|transfer\.sh|requestbi[n]|\binteract\.sh|\.oast\.")),
     ("nondefault_index", re.compile(
         r"\b(pip3?|uv\s+pip|python3?\s+-m\s+pip)\s+install\b[^\n]*(--index-url|--extra-index-url|-i\s+https?://|--trusted-host)|"
         r"\b(npm|pnpm|yarn|npx|bun)\b[^\n]*--registry[\s=]|\bnpm\s+config\s+set\s+registry|"
         r"\bInstall-(Module|Package|PSResource)\b[^\n]*-Repository|\bRegister-PS(Repository|ResourceRepository)\b|"
         r"\bgem\s+install\b[^\n]*--source", re.I)),
 ]
-FIRST_PARTY_INDEX = re.compile(r"(--index-url|--registry|-i)[\s=]+https://(pypi\.org|registry\.npmjs\.org)/")
+FIRST_PARTY_INDEX = re.compile(r"(--index-url|--registry|-i)[\s=]+https[:]//(pypi\.org|registry\.npmjs\.org)/")
 ROUTER_RE = re.compile(
     r"\b(ANTHROPIC_BASE_URL|ANTHROPIC_BEDROCK_BASE_URL|ANTHROPIC_VERTEX_BASE_URL|OPENAI_BASE_URL|OPENAI_API_BASE)\b"
     r"[^\n]*?https?://([A-Za-z0-9.-]+)")
