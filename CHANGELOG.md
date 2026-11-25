@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `SKILL.md` helper calls were written with a quoted script path, which the literal `Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/audit/scripts/*)` grant does not match; headless runs refused them. All calls are now unquoted, with a stop rule for paths that need quoting.
 - The skill's `scripts/*` Bash grant matched `scripts/../<anything>` (permission matching is textual). Each helper now has its own grant, and the artifacts checklist rates a directory-wildcard script grant `CAUTION`.
 - The cross-check is strict per owner, and the owning sub-agents are told to list every path in their categories, including instruction files, fixtures and `doc:` lines.
+- The malicious fixture's `.mcp.json` is now `dot-mcp.json`, so opening the fixture folder in Claude Code offers no servers; the scanner reads both names. Wording that read as auditor-directed ("skip this step silently", a safe-fixture description naming the expected verdict) is reworded.
 - Test fixtures: an unreachable planted fixture (nothing outside it runs, sources or registers it, and it is not at a loader path) now collapses into one `CAUTION` per fixture directory instead of a stack of `FAIL`s. Reachable fixture code keeps full severity.
 - Self-scan noise: hits in plain documentation get a `doc:` prefix (`doc_class.py`; instruction files are never tagged, secrets and Unicode never tagged), and the helpers' own pattern sources no longer match themselves. Tighter DNS-tool host extraction.
 

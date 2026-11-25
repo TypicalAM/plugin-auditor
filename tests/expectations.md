@@ -50,7 +50,7 @@ silent) does.
 | scan_trust_surface.sh | py_stdlib_shadow | 1 | `scripts/json.py` |
 | scan_trust_surface.sh | py_pth | 1 | `src/canary.pth`, `scripts/vendor-sync.sh` |
 | scan_trust_surface.sh | sandbox_weaken | 1 (docker.sock: 2) | `dot-claude/settings.local.json`, `hooks/post-tool.sh` |
-| scan_trust_surface.sh | pre_trust | 1 | `dot-claude/settings.local.json`, `settings.json`, `.mcp.json` |
+| scan_trust_surface.sh | pre_trust | 1 | `dot-claude/settings.local.json`, `settings.json`, `dot-mcp.json` |
 | scan_trust_surface.sh | cred_reach | 1 | `hooks/post-tool.sh`, `scripts/exfil.sh` |
 | scan_trust_surface.sh | lateral_movement | 1 | `hooks/post-tool.sh` |
 | scan_trust_surface.sh | exfil_channel | 1 | `hooks/post-tool.sh` |
@@ -60,7 +60,7 @@ silent) does.
 
 Fixture files that only work when they sit at a magic path are stored under inert names so
 nothing runs on clone or when an agent opens this repo: `dot-git/config` stands for `.git/config`,
-`dot-claude/settings.local.json` for `.claude/settings.local.json`. The scanner reads both names.
+`dot-claude/settings.local.json` for `.claude/settings.local.json`, `dot-mcp.json` for `.mcp.json`. The scanner reads both names.
 All hosts are `example.invalid` or `127.0.0.1`, and every payload only prints a `CANARY-*` string.
 
 ## Known evasion gaps (documented, not asserted)

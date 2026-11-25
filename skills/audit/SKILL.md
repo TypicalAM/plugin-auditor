@@ -261,7 +261,7 @@ Then, if at least one `FAIL` or `CAUTION` exists, use `AskUserQuestion` to offer
 
 ## Step 10 — Clean up cloned repositories
 
-Run this step ONLY if the orchestrator cloned the repository itself in Step 0 (i.e. the argument was a URL, not a local path). If `REPO_PATH` points at a user-supplied location, skip this step silently.
+Run this step ONLY if the orchestrator cloned the repository itself in Step 0 (i.e. the argument was a URL, not a local path). If `REPO_PATH` points at a user-supplied location, skip this step and say nothing about cleanup.
 
 1. Print an explicit summary of the clone artifacts:
 

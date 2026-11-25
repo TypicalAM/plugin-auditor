@@ -273,7 +273,7 @@ def scan_file(full, rel):
         if data is not None:
             if re.match(r"^(settings[\w.-]*|managed-settings|hooks)\.json$", base):
                 scan_settings(rel, lines, data)
-            if base in {".mcp.json", "mcp.json"}:
+            if base in {".mcp.json", "mcp.json", "dot-mcp.json"}:
                 scan_mcp(rel, lines, data)
             if base == "package.json":
                 scan_package_json(rel, lines, data)
